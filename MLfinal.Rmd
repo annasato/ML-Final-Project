@@ -1,0 +1,140 @@
+---
+title: Predicting Human Activity Class with Groupware's Human Activity Recognition
+  Database
+author: "By yama3"
+date: "8/9/2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Executive Summary
+
+This study examines Groupware's Human Activity Recognition data to predict activities being performed by human subjects using off-the-shelf machine learning algorithms in R. Subjects were fitted with various sensors on their body and measurements recorded to generate a training database to model various activities like sitting, walking, standing coded as a multi-level outcome variable. A separate testing database of 20 entries was provided.
+
+After data cleanup, we can conclude that the popular "random forest", "generalized boosted regression models" and "support vector machines" can be used for predicting human activities with a high degree of accuracy: 100% on the given testcase.
+
+
+# 2. Data Analysis and cleanup
+
+The training and testing data was provided by Groupware's Human Activity Recognition project: http://groupware.les.inf.puc-rio.br/har
+
+Specifically, the training set was downloaded from:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+And, the test set was downloaded from:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The training database is relatively large with close to 20,000 samples.
+
+```{r message=F, warning=F }
+training <- read.csv('pml-training.csv')
+testing <- read.csv('pml-testing.csv')
+
+dim(training)
+dim(testing)
+```
+
+The first 7 columns in the data irrelevant for our analysis since they hold serial numbers, subject name, time stamp of data and whether this was a new window for data collection or not and the window number.
+
+Upon examination, the testing data had also several empty and NA columns. 
+
+The variables in the training and testing data can be reduced based on these observations.
+
+```{r clean}
+tr.clean <- training[,-c(1:7,12:36,50:59,69:83,87:101,103:112,125:139,141:150)]
+tst.clean <- testing[,-c(1:7,12:36,50:59,69:83,87:101,103:112,125:139,141:150)]
+```
+
+The resulting data is more manageable and excluding unnecessary regressors should provide for a more accurate model.
+
+
+```{r clean2}
+dim(tr.clean)
+dim(tst.clean)
+```
+
+
+# 3. Validation strategy
+
+A validation data set is required for performing accuracy analysis to aid in model selection. The training database can be divided into training and validation. Since the training data holds a large number of observations, a 90-10 data partition should be sufficient.
+
+``` {r partition}
+library(caret)
+inTrain <- createDataPartition(tr.clean$classe, p=0.9, list=FALSE)
+tr.df <- tr.clean[ inTrain, ]
+val.df <- tr.clean[ -inTrain, ]
+```
+
+# 4. Applying Off-the-shelf Machine Learning algorithms
+
+Multi-variable regression would be a simple algorithm to begin with due to it's relatively short run-time. It generates several warnings and cannot be used since the outcome variable (classe) is a multi-level categorical variable.
+
+We can try the other go-to algorithms next and proceed to tuning and more later based on the initial results of these classifiers.
+
+## 4.1 Random Forest
+
+```{r rf}
+library(parallel); library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # leave 1 core for OS
+fitControl <- trainControl(allowParallel=TRUE) 
+fit.rf <- train(classe ~ ., method = "rf", data = tr.df, trainControl = fitControl)
+stopCluster(cluster)
+registerDoSEQ()
+
+fit.rf
+predict.rf.val <- predict(fit.rf, newdata = val.df)
+confusionMatrix(predict.rf.val, val.df$classe)$overall[1]
+```
+
+## 4.2 Generalized Boosting
+
+```{r gbm}
+fit.gbm <- train(classe ~ ., method ="gbm", data =tr.df, verbose=FALSE)
+fit.gbm
+predict.gbm.val <- predict(fit.gbm, newdata = val.df)
+confusionMatrix(predict.gbm.val, val.df$classe)$overall[1]
+```
+
+## 4.3  SVM (Support Vector Machine)
+
+``` {r svm}
+library(e1071)
+fit.svm <- svm(classe ~ ., data = tr.df)
+summary(fit.svm)
+predict.svm.val <- predict(fit.svm, newdata = val.df)
+confusionMatrix(predict.svm.val, val.df$classe)$overall[1]
+```
+
+Since we have close to 95% or more accuracy on our validation data with these classifiers, we can proceed to use them on the test data and majority vote on the outcome.  (I tried using Naive Bayes and some others and did not get close to the accuracy of the above three classifiers.)
+
+# 5. Result on the given test data
+
+It is a simple exercise to use predict on the test data for the 3 chosen models.
+
+``` {r final}
+predict.rf.tst <- predict(fit.rf, newdata = tst.clean)
+predict.rf.tst
+
+predict.gbm.tst <- predict(fit.gbm, newdata = tst.clean)
+predict.gbm.tst
+
+predict.svm.tst <- predict(fit.svm, newdata = tst.clean)
+predict.svm.tst
+```
+
+# 6. Further work: tuning and design
+
+For the purpose of this exercise, the model selection and validation exercise was sufficient. However, the classifiers can be tuned some more by use of more complex validation, boosting and other tuning parameters. The beauty of the caret package is that it allows us to specify these parameters and generates a detailed report on what was the best tuning combination.
+
+As also, caret supports tens of algorithims which can be easily tried out. One task would be to write a super-classifier which runs several tens of these classifiers on a cluster of machines and picks the one with the most accuracy or majority votes etc.
+
+In conclusion, all the three classifiers (random forest, generalized boosting, support vector machine) were sufficient to accurately classify the given test case and show good promise for use in Human Activity Recognition systems.
+
+
+
